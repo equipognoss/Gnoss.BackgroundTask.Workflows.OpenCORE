@@ -360,4 +360,4 @@ Gnoss.Web/appsettings.json
 #Carpetas de configuración
 */config/*
 *.config
-#*appsettings*.json
+*appsettings*.json
