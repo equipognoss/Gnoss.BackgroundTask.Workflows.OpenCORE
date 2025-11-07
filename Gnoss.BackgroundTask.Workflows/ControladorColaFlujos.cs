@@ -1,10 +1,16 @@
 ﻿using Es.Riam.AbstractsOpen;
+using Es.Riam.Gnoss.AD.BASE_BD;
+using Es.Riam.Gnoss.AD.EncapsuladoDatos;
 using Es.Riam.Gnoss.AD.EntityModel;
 using Es.Riam.Gnoss.AD.EntityModelBASE;
 using Es.Riam.Gnoss.AD.Facetado;
+using Es.Riam.Gnoss.AD.Live;
 using Es.Riam.Gnoss.AD.Virtuoso;
 using Es.Riam.Gnoss.CL;
+using Es.Riam.Gnoss.CL.CMS;
+using Es.Riam.Gnoss.Elementos.CMS;
 using Es.Riam.Gnoss.Elementos.ParametroAplicacion;
+using Es.Riam.Gnoss.Logica.CMS;
 using Es.Riam.Gnoss.Logica.Documentacion;
 using Es.Riam.Gnoss.Logica.Facetado;
 using Es.Riam.Gnoss.Logica.Flujos;
@@ -14,9 +20,11 @@ using Es.Riam.Gnoss.Recursos;
 using Es.Riam.Gnoss.Servicios;
 using Es.Riam.Gnoss.Util.Configuracion;
 using Es.Riam.Gnoss.Util.General;
+using Es.Riam.Gnoss.Web.Controles.Documentacion;
 using Es.Riam.Gnoss.Web.Controles.ParametroAplicacionGBD;
 using Es.Riam.Gnoss.Web.MVC.Models.Administracion;
 using Es.Riam.Gnoss.Web.MVC.Models.Flujos;
+using Es.Riam.Interfaces.InterfacesOpen;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
@@ -37,6 +45,7 @@ namespace Gnoss.BackgroundTask.Workflows
         private VirtuosoAD mVirtuosoAD;
         private IServicesUtilVirtuosoAndReplication mServicesUtilVirtuosoAndReplication;
         private GnossCache mGnossCache;
+        private IAvailableServices mAvailableServices;
 
         private ILogger mlogger;
         private ILoggerFactory mLoggerFactory;
@@ -127,6 +136,7 @@ namespace Gnoss.BackgroundTask.Workflows
                 mRedisCacheWrapper = scope.ServiceProvider.GetRequiredService<RedisCacheWrapper>();
                 mServicesUtilVirtuosoAndReplication = scope.ServiceProvider.GetRequiredService<IServicesUtilVirtuosoAndReplication>();
                 mGnossCache = scope.ServiceProvider.GetService<GnossCache>();
+                mAvailableServices = scope.ServiceProvider.GetRequiredService<IAvailableServices>();
 
                 try
                 {
@@ -181,6 +191,8 @@ namespace Gnoss.BackgroundTask.Workflows
 
             ProcesarTriplesEstadosVirtuoso(diccionarioRecursoIDEstadoID, pModel.ProyectoID, pModel.TipoAfectado, !pModel.EliminarEstado);
 
+            InvalidarCaches(diccionarioRecursoIDEstadoID, pModel.ProyectoID, pModel.UsuarioID, pModel.TipoAfectado);
+
             if (pModel.EliminarFlujo)
             {
                 switch (pModel.TipoAfectado)
@@ -215,11 +227,21 @@ namespace Gnoss.BackgroundTask.Workflows
 
             string rdfType = "Recurso";
 
+            if (pTipoContenido == TiposContenidos.PaginaCMS)
+            {
+                rdfType = FacetadoAD.PAGINA_CMS;
+            }
+            else if (pTipoContenido == TiposContenidos.ComponenteCMS)
+            {
+                rdfType = FacetadoAD.COMPONENTE_CMS;
+            }
+
+
             HashSet<Guid> recursosProcesados = new HashSet<Guid>();
 
             if (pAgregarTriples)
             {
-                EscribirTriplesEstadoVirtuoso(pDiccionarioRecursos, pProyectoID, pTipoContenido , rdfType, documentacionCN, facetadoCN);
+                EscribirTriplesEstadoVirtuoso(pDiccionarioRecursos, pProyectoID, pTipoContenido, rdfType, documentacionCN, facetadoCN);
             }
             else
             {
@@ -274,6 +296,92 @@ namespace Gnoss.BackgroundTask.Workflows
                     recursosProcesados.Add(recursoID);
                 }
             }
+        }
+
+        private void InvalidarCaches(Dictionary<Guid, Guid> pDiccionarioRecursos, Guid pProyectoID, Guid pUsuarioID, TiposContenidos pTipoContenido)
+        {
+            mLoggingService.AgregarEntrada($"Invalidando cachés: \t\nTipo de recurso: {pTipoContenido}\t\nLista de recursos: {string.Join(",", pDiccionarioRecursos.Keys)}\t\nProyectoID: {pProyectoID}\t\nUsuarioID: {pUsuarioID}");
+
+            switch (pTipoContenido)
+            {
+                case TiposContenidos.Nota:
+                case TiposContenidos.Adjunto:
+                case TiposContenidos.Link:
+                case TiposContenidos.Video:
+                case TiposContenidos.Debate:
+                case TiposContenidos.Encuesta:
+                case TiposContenidos.RecursoSemantico:
+                    ControladorDocumentacion controladorDocumentacion = new ControladorDocumentacion(mLoggingService, mEntityContext, mConfigService, mRedisCacheWrapper, mGnossCache, mEntityContextBASE, mVirtuosoAD, null, mServicesUtilVirtuosoAndReplication, mLoggerFactory.CreateLogger<ControladorDocumentacion>(), mLoggerFactory);
+                    DocumentacionCN docCN = new DocumentacionCN(mEntityContext, mLoggingService, mConfigService, mServicesUtilVirtuosoAndReplication, mLoggerFactory.CreateLogger<DocumentacionCN>(), mLoggerFactory);
+                    FlujosCN flujosCN = new FlujosCN(mEntityContext, mLoggingService, mConfigService, mServicesUtilVirtuosoAndReplication, mLoggerFactory.CreateLogger<FlujosCN>(), mLoggerFactory);
+
+                    foreach (Guid documentoID in pDiccionarioRecursos.Keys)
+                    {
+                        controladorDocumentacion.BorrarCacheControlFichaRecursos(documentoID);
+                        
+                        #region Actualizar Live
+                        bool estadoPublico = flujosCN.ComprobarEstadoEsPublico(pDiccionarioRecursos[documentoID]);
+                        bool recursoPublico = !docCN.EsDocumentoEnProyectoPrivadoEditores(documentoID, pProyectoID);
+                        bool privacidadCambiada = recursoPublico != estadoPublico;
+                        if (docCN.ComprobarSiEsUltimaVersionDocumento(documentoID))
+                        {
+                            ActualizarLive(pProyectoID, documentoID, pTipoContenido, privacidadCambiada, controladorDocumentacion);
+                        }
+                        #endregion
+                    }
+                    flujosCN.Dispose();
+                    docCN.Dispose();
+                    break;
+                case TiposContenidos.PaginaCMS:
+                    using (CMSCL cmsCL = new CMSCL(mEntityContext, mLoggingService, mRedisCacheWrapper, mConfigService, mServicesUtilVirtuosoAndReplication, mLoggerFactory.CreateLogger<CMSCL>(), mLoggerFactory))
+                    {
+                        cmsCL.InvalidarCacheQueContengaCadena(pProyectoID.ToString());
+                    }
+                    break;
+                case TiposContenidos.ComponenteCMS:
+                    using (CMSCL cmsCL = new CMSCL(mEntityContext, mLoggingService, mRedisCacheWrapper, mConfigService, mServicesUtilVirtuosoAndReplication, mLoggerFactory.CreateLogger<CMSCL>(), mLoggerFactory))
+                    {
+                        cmsCL.InvalidarCachesDeComponentesEnProyecto(pProyectoID);
+                        cmsCL.InvalidarCacheConfiguracionCMSPorProyecto(pProyectoID);
+                        using (CMSCN CMSCN = new CMSCN(mEntityContext, mLoggingService, mConfigService, mServicesUtilVirtuosoAndReplication, mLoggerFactory.CreateLogger<CMSCN>(), mLoggerFactory))
+                        using (GestionCMS gestorCMS2 = new GestionCMS(CMSCN.ObtenerCMSDeProyecto(pProyectoID), mLoggingService, mEntityContext))
+                        {
+                            if (gestorCMS2.ListaPaginasProyectos.ContainsKey(pProyectoID))
+                            {
+                                foreach (short tipoPagina in gestorCMS2.ListaPaginasProyectos[pProyectoID].Keys)
+                                {
+                                    cmsCL.InvalidarCacheCMSDeUbicacionDeProyecto(tipoPagina, pProyectoID);
+                                }
+
+                                ProyectoCN proyCN = new ProyectoCN(mEntityContext, mLoggingService, mConfigService, mServicesUtilVirtuosoAndReplication, mLoggerFactory.CreateLogger<ProyectoCN>(), mLoggerFactory);
+                                List<Guid> proys = new List<Guid> { pProyectoID };
+                                DataWrapperProyecto dw = proyCN.ObtenerProyectosHijosDeProyectos(proys, pUsuarioID);
+                                cmsCL.InvalidarCachesCMSDeUbicacionesDeProyectos(dw.ListaProyecto);
+                                proyCN.Dispose();
+                            }
+                        }
+                    }
+                    break;
+            }
+        }
+
+        private void ActualizarLive(Guid pProyectoID, Guid pDocumentoID, TiposContenidos pTipoContenido, bool pPrivacidadCambiada, ControladorDocumentacion pControladorDocumentacion)
+        {
+            int tipoLive = ObtenerTipoLive(pTipoContenido);
+
+            string infoExtra = pPrivacidadCambiada ? Constantes.PRIVACIDAD_CAMBIADA : string.Empty;
+
+            pControladorDocumentacion.ActualizarGnossLive(pProyectoID, pDocumentoID, AccionLive.Agregado, tipoLive, PrioridadLive.Media, infoExtra, mAvailableServices);
+
+            if (pPrivacidadCambiada)
+            {
+                pControladorDocumentacion.ActualizarGnossLive(pProyectoID, pDocumentoID, AccionLive.Editado, tipoLive, PrioridadLive.Media, infoExtra, mAvailableServices);
+            }
+        }
+
+        public int ObtenerTipoLive(TiposContenidos pTipoContenido)
+        {
+            return pTipoContenido == TiposContenidos.Debate ? (int)TipoLive.Debate : (int)TipoLive.Recurso;
         }
 
         #endregion
