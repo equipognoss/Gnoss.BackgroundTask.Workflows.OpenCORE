@@ -34,7 +34,6 @@ namespace Gnoss.BackgroundTask.Workflows
     internal class ControladorColaFlujos : ControladorServicioGnoss
     {
         private const string COLA_FLUJOS = "ColaFlujos";
-        private const string EXCHANGE = "";
 
         #region Miembros
 
@@ -47,8 +46,8 @@ namespace Gnoss.BackgroundTask.Workflows
         private GnossCache mGnossCache;
         private IAvailableServices mAvailableServices;
 
-        private ILogger mlogger;
-        private ILoggerFactory mLoggerFactory;
+        private readonly ILogger _logger;
+        private readonly ILoggerFactory _loggerFactory;
 
         #endregion
 
@@ -57,13 +56,13 @@ namespace Gnoss.BackgroundTask.Workflows
         public ControladorColaFlujos(IServiceScopeFactory scopedFactory, ConfigService configService, ILogger<ControladorColaFlujos> logger, ILoggerFactory loggerFactory)
             : base(scopedFactory, configService, logger, loggerFactory)
         {
-            mlogger = logger;
-            mLoggerFactory = loggerFactory;
+            _logger = logger;
+            _loggerFactory = loggerFactory;
         }
 
         protected override ControladorServicioGnoss ClonarControlador()
         {
-            return new ControladorColaFlujos(ScopedFactory, mConfigService, mLoggerFactory.CreateLogger<ControladorColaFlujos>(), mLoggerFactory);
+            return new ControladorColaFlujos(ScopedFactory, mConfigService, _loggerFactory.CreateLogger<ControladorColaFlujos>(), _loggerFactory);
         }
 
         #endregion
@@ -76,7 +75,7 @@ namespace Gnoss.BackgroundTask.Workflows
             {
                 RabbitMQClient.ReceivedDelegate funcionProcesarItem = new RabbitMQClient.ReceivedDelegate(ProcesarItem);
                 RabbitMQClient.ShutDownDelegate funcionShutDown = new RabbitMQClient.ShutDownDelegate(OnShutDown);
-                RabbitMQClient rMQ = new RabbitMQClient(RabbitMQClient.BD_SERVICIOS_WIN, COLA_FLUJOS, loggingService, mConfigService, mLoggerFactory.CreateLogger<RabbitMQClient>(), mLoggerFactory);
+                RabbitMQClient rMQ = new RabbitMQClient(RabbitMQClient.BD_SERVICIOS_WIN, COLA_FLUJOS, loggingService, mConfigService, _loggerFactory.CreateLogger<RabbitMQClient>(), _loggerFactory);
 
                 try
                 {
@@ -84,7 +83,7 @@ namespace Gnoss.BackgroundTask.Workflows
                 }
                 catch (Exception ex)
                 {
-                    loggingService.GuardarLogError(ex, $"Error al procesar el elemento de la cola", mlogger);
+                    loggingService.GuardarLogError(ex, $"Error al procesar el elemento de la cola", _logger);
                     throw;
                 }
             }
@@ -99,12 +98,12 @@ namespace Gnoss.BackgroundTask.Workflows
             parametroAplicacionGBD.ObtenerConfiguracionGnoss(gestorParametroAplicacion);
             mUrlIntragnoss = gestorParametroAplicacion.ParametroAplicacion.Find(parametroApp => parametroApp.Parametro.Equals("UrlIntragnoss")).Valor;
 
-            FacetaCN facetaCN = new FacetaCN(entityContext, loggingService, mConfigService, servicesUtilVirtuosoAndReplication, mLoggerFactory.CreateLogger<FacetaCN>(), mLoggerFactory);
-            FacetadoAD facetadoAD = new FacetadoAD(mUrlIntragnoss, loggingService, entityContext, mConfigService, virtuosoAD, servicesUtilVirtuosoAndReplication, mLoggerFactory.CreateLogger<FacetadoAD>(), mLoggerFactory);
+            FacetaCN facetaCN = new FacetaCN(entityContext, loggingService, mConfigService, servicesUtilVirtuosoAndReplication, _loggerFactory.CreateLogger<FacetaCN>(), _loggerFactory);
+            FacetadoAD facetadoAD = new FacetadoAD(mUrlIntragnoss, loggingService, entityContext, mConfigService, virtuosoAD, servicesUtilVirtuosoAndReplication, _loggerFactory.CreateLogger<FacetadoAD>(), _loggerFactory);
             facetaCN.CargarConfiguracionConexionGrafo(facetadoAD.ServidoresGrafo);
             facetaCN.Dispose();
 
-            ProyectoCN proyCN = new ProyectoCN(entityContext, loggingService, mConfigService, servicesUtilVirtuosoAndReplication, mLoggerFactory.CreateLogger<ProyectoCN>(), mLoggerFactory);
+            ProyectoCN proyCN = new ProyectoCN(entityContext, loggingService, mConfigService, servicesUtilVirtuosoAndReplication, _loggerFactory.CreateLogger<ProyectoCN>(), _loggerFactory);
             proyCN.Dispose();
 
             #region Establezco el dominio de la cache
@@ -154,7 +153,7 @@ namespace Gnoss.BackgroundTask.Workflows
                 }
                 catch (Exception ex)
                 {
-                    mLoggingService.GuardarLogError(ex, $"Error al procesar la fila --> {pFila}", mlogger);
+                    mLoggingService.GuardarLogError(ex, $"Error al procesar la fila --> {pFila}", _logger);
                 }
 
                 return true;
@@ -163,57 +162,61 @@ namespace Gnoss.BackgroundTask.Workflows
 
         public void ProcesarFilaDeCola(ColaProcesarFlujo pModel)
         {
-
-            FlujosCN flujosCN = new FlujosCN(mEntityContext, mLoggingService, mConfigService, mServicesUtilVirtuosoAndReplication, mLoggerFactory.CreateLogger<FlujosCN>(), mLoggerFactory);
-            Dictionary<Guid, Guid> diccionarioRecursoIDEstadoID = new Dictionary<Guid, Guid>();
-            switch (pModel.TipoAfectado)
+            FlujosCN flujosCN = new FlujosCN(mEntityContext, mLoggingService, mConfigService, mServicesUtilVirtuosoAndReplication, _loggerFactory.CreateLogger<FlujosCN>(), _loggerFactory);
+            try
             {
-                case TiposContenidos.Nota:
-                case TiposContenidos.Adjunto:
-                case TiposContenidos.Link:
-                case TiposContenidos.Video:
-                case TiposContenidos.Debate:
-                case TiposContenidos.Encuesta:
-                    diccionarioRecursoIDEstadoID = flujosCN.ActualizarEstadosRecursos(pModel.EstadoID, pModel.ProyectoID, new List<Guid>(), (short)pModel.TipoAfectado, pModel.EliminarEstado);
-                    break;
-                case TiposContenidos.RecursoSemantico:
-                    diccionarioRecursoIDEstadoID = flujosCN.ActualizarEstadosRecursos(pModel.EstadoID, pModel.ProyectoID, pModel.OntologiasAfectadas, (short)pModel.TipoAfectado, pModel.EliminarEstado);
-                    break;
-                case TiposContenidos.PaginaCMS:
-                    diccionarioRecursoIDEstadoID = flujosCN.ActualizarEstadoPaginasCMS(pModel.EstadoID, pModel.ProyectoID, pModel.EliminarEstado);
-                    break;
-                case TiposContenidos.ComponenteCMS:
-                    diccionarioRecursoIDEstadoID = flujosCN.ActualizarEstadoComponentesCMS(pModel.EstadoID, pModel.ProyectoID, pModel.EliminarEstado);
-                    break;
-                default:
-                    break;
-            }
-
-            ProcesarTriplesEstadosVirtuoso(diccionarioRecursoIDEstadoID, pModel.ProyectoID, pModel.TipoAfectado, !pModel.EliminarEstado);
-
-            InvalidarCaches(diccionarioRecursoIDEstadoID, pModel.ProyectoID, pModel.UsuarioID, pModel.TipoAfectado);
-
-            if (pModel.EliminarFlujo)
-            {
-                switch (pModel.TipoAfectado)
+                flujosCN.IniciarTransaccion();
+                Dictionary<Guid, Guid> diccionarioRecursoIDEstadoID = new Dictionary<Guid, Guid>();
+                foreach(TiposContenidos tipoContenido in pModel.TiposAfectados)
                 {
-                    case TiposContenidos.Nota:
-                    case TiposContenidos.Adjunto:
-                    case TiposContenidos.Link:
-                    case TiposContenidos.Video:
-                    case TiposContenidos.Debate:
-                    case TiposContenidos.Encuesta:
-                    case TiposContenidos.RecursoSemantico:
-                        flujosCN.ActualizarEditoresRecursos(diccionarioRecursoIDEstadoID);
-                        break;
+                    switch (tipoContenido)
+                    {
+                        case TiposContenidos.Nota:
+                        case TiposContenidos.Adjunto:
+                        case TiposContenidos.Link:
+                        case TiposContenidos.Video:
+                        case TiposContenidos.Debate:
+                        case TiposContenidos.Encuesta:
+                        case TiposContenidos.RecursoSemantico:
+                            List<Guid> ontlogiasABuscar = tipoContenido == TiposContenidos.RecursoSemantico ? pModel.OntologiasAfectadas : new List<Guid>();
+                            diccionarioRecursoIDEstadoID = flujosCN.ActualizarEstadosRecursos(pModel.EstadoID, pModel.ProyectoID, ontlogiasABuscar, (short)tipoContenido, pModel.EliminarEstado);
+                            // Actualizar los estadoid de las versiones 
+                            flujosCN.ActualizarEstadosVersionRecursos(diccionarioRecursoIDEstadoID.Keys.ToList(), pModel.EstadoID, pModel.EliminarEstado);
+                            // Si se elimina el flujo, asignar editores a los recursos en caso de que no tengna ninguno disponible
+                            if (pModel.EliminarFlujo)
+                            {
+                                flujosCN.ActualizarEditoresRecursos(diccionarioRecursoIDEstadoID);
+                            }
+                            break;
+                        case TiposContenidos.PaginaCMS:
+                            diccionarioRecursoIDEstadoID = flujosCN.ActualizarEstadoPaginasCMS(pModel.EstadoID, pModel.ProyectoID, pModel.EliminarEstado);
+                            break;
+                        case TiposContenidos.ComponenteCMS:
+                            diccionarioRecursoIDEstadoID = flujosCN.ActualizarEstadoComponentesCMS(pModel.EstadoID, pModel.ProyectoID, pModel.EliminarEstado);
+                            break;
+                        default:
+                            break;
+                    }
+
+                    ProcesarTriplesEstadosVirtuoso(diccionarioRecursoIDEstadoID, pModel.ProyectoID, tipoContenido, !pModel.EliminarEstado);
+                    InvalidarCaches(diccionarioRecursoIDEstadoID, pModel.ProyectoID, pModel.UsuarioID, tipoContenido);
                 }
 
-                List<Guid> estados = flujosCN.ObtenerEstadosIDPorFlujoID(pModel.FlujoID);
-                List<Guid> transiciones = flujosCN.ObtenerTransicionesIDPorEstadosID(estados);
+                if (pModel.EliminarFlujo)
+                {
+                    EliminarFlujo(pModel.FlujoID, pModel.ProyectoID, flujosCN);
+                }
 
-                flujosCN.EliminarTransiciones(transiciones);
-                flujosCN.EliminarEstados(estados, pModel.FlujoID);
-                flujosCN.EliminarFlujo(pModel.FlujoID, pModel.ProyectoID);
+                flujosCN.TerminarTransaccion(true);
+            }
+            catch (Exception ex)
+            {
+                flujosCN.TerminarTransaccion(false);
+                mLoggingService.GuardarLogError(ex, $"ERROR: ${ex.Message}\r\nStackTrace: {ex.StackTrace}", _logger);
+            }
+            finally
+            {
+                flujosCN.Dispose();
             }
         }
         #endregion
@@ -222,8 +225,8 @@ namespace Gnoss.BackgroundTask.Workflows
 
         private void ProcesarTriplesEstadosVirtuoso(Dictionary<Guid, Guid> pDiccionarioRecursos, Guid pProyectoID, TiposContenidos pTipoContenido, bool pAgregarTriples)
         {
-            FacetadoCN facetadoCN = new FacetadoCN(mUrlIntragnoss, mEntityContext, mLoggingService, mConfigService, mVirtuosoAD, mServicesUtilVirtuosoAndReplication, mLoggerFactory.CreateLogger<FacetadoCN>(), mLoggerFactory);
-            DocumentacionCN documentacionCN = new DocumentacionCN(mEntityContext, mLoggingService, mConfigService, mServicesUtilVirtuosoAndReplication, mLoggerFactory.CreateLogger<DocumentacionCN>(), mLoggerFactory);
+            FacetadoCN facetadoCN = new FacetadoCN(mUrlIntragnoss, mEntityContext, mLoggingService, mConfigService, mVirtuosoAD, mServicesUtilVirtuosoAndReplication, _loggerFactory.CreateLogger<FacetadoCN>(), _loggerFactory);
+            DocumentacionCN documentacionCN = new DocumentacionCN(mEntityContext, mLoggingService, mConfigService, mServicesUtilVirtuosoAndReplication, _loggerFactory.CreateLogger<DocumentacionCN>(), _loggerFactory);
 
             string rdfType = "Recurso";
 
@@ -236,9 +239,6 @@ namespace Gnoss.BackgroundTask.Workflows
                 rdfType = FacetadoAD.COMPONENTE_CMS;
             }
 
-
-            HashSet<Guid> recursosProcesados = new HashSet<Guid>();
-
             if (pAgregarTriples)
             {
                 EscribirTriplesEstadoVirtuoso(pDiccionarioRecursos, pProyectoID, pTipoContenido, rdfType, documentacionCN, facetadoCN);
@@ -247,6 +247,9 @@ namespace Gnoss.BackgroundTask.Workflows
             {
                 BorrarTriplesEstadoVirtuoso(pDiccionarioRecursos, pProyectoID, pTipoContenido, rdfType, documentacionCN, facetadoCN);
             }
+
+            facetadoCN.Dispose();
+            documentacionCN.Dispose();
         }
 
         private void EscribirTriplesEstadoVirtuoso(Dictionary<Guid, Guid> pDiccionarioRecursos, Guid pProyectoID, TiposContenidos pTipoContenido, string rdfType, DocumentacionCN pDocumentacionCN, FacetadoCN pFacetadoCN)
@@ -311,14 +314,14 @@ namespace Gnoss.BackgroundTask.Workflows
                 case TiposContenidos.Debate:
                 case TiposContenidos.Encuesta:
                 case TiposContenidos.RecursoSemantico:
-                    ControladorDocumentacion controladorDocumentacion = new ControladorDocumentacion(mLoggingService, mEntityContext, mConfigService, mRedisCacheWrapper, mGnossCache, mEntityContextBASE, mVirtuosoAD, null, mServicesUtilVirtuosoAndReplication, mLoggerFactory.CreateLogger<ControladorDocumentacion>(), mLoggerFactory);
-                    DocumentacionCN docCN = new DocumentacionCN(mEntityContext, mLoggingService, mConfigService, mServicesUtilVirtuosoAndReplication, mLoggerFactory.CreateLogger<DocumentacionCN>(), mLoggerFactory);
-                    FlujosCN flujosCN = new FlujosCN(mEntityContext, mLoggingService, mConfigService, mServicesUtilVirtuosoAndReplication, mLoggerFactory.CreateLogger<FlujosCN>(), mLoggerFactory);
+                    ControladorDocumentacion controladorDocumentacion = new ControladorDocumentacion(mLoggingService, mEntityContext, mConfigService, mRedisCacheWrapper, mGnossCache, mEntityContextBASE, mVirtuosoAD, null, mServicesUtilVirtuosoAndReplication, _loggerFactory.CreateLogger<ControladorDocumentacion>(), _loggerFactory);
+                    DocumentacionCN docCN = new DocumentacionCN(mEntityContext, mLoggingService, mConfigService, mServicesUtilVirtuosoAndReplication, _loggerFactory.CreateLogger<DocumentacionCN>(), _loggerFactory);
+                    FlujosCN flujosCN = new FlujosCN(mEntityContext, mLoggingService, mConfigService, mServicesUtilVirtuosoAndReplication, _loggerFactory.CreateLogger<FlujosCN>(), _loggerFactory);
 
                     foreach (Guid documentoID in pDiccionarioRecursos.Keys)
                     {
                         controladorDocumentacion.BorrarCacheControlFichaRecursos(documentoID);
-                        
+
                         #region Actualizar Live
                         bool estadoPublico = flujosCN.ComprobarEstadoEsPublico(pDiccionarioRecursos[documentoID]);
                         bool recursoPublico = !docCN.EsDocumentoEnProyectoPrivadoEditores(documentoID, pProyectoID);
@@ -333,17 +336,17 @@ namespace Gnoss.BackgroundTask.Workflows
                     docCN.Dispose();
                     break;
                 case TiposContenidos.PaginaCMS:
-                    using (CMSCL cmsCL = new CMSCL(mEntityContext, mLoggingService, mRedisCacheWrapper, mConfigService, mServicesUtilVirtuosoAndReplication, mLoggerFactory.CreateLogger<CMSCL>(), mLoggerFactory))
+                    using (CMSCL cmsCL = new CMSCL(mEntityContext, mLoggingService, mRedisCacheWrapper, mConfigService, mServicesUtilVirtuosoAndReplication, _loggerFactory.CreateLogger<CMSCL>(), _loggerFactory))
                     {
                         cmsCL.InvalidarCacheQueContengaCadena(pProyectoID.ToString());
                     }
                     break;
                 case TiposContenidos.ComponenteCMS:
-                    using (CMSCL cmsCL = new CMSCL(mEntityContext, mLoggingService, mRedisCacheWrapper, mConfigService, mServicesUtilVirtuosoAndReplication, mLoggerFactory.CreateLogger<CMSCL>(), mLoggerFactory))
+                    using (CMSCL cmsCL = new CMSCL(mEntityContext, mLoggingService, mRedisCacheWrapper, mConfigService, mServicesUtilVirtuosoAndReplication, _loggerFactory.CreateLogger<CMSCL>(), _loggerFactory))
                     {
                         cmsCL.InvalidarCachesDeComponentesEnProyecto(pProyectoID);
                         cmsCL.InvalidarCacheConfiguracionCMSPorProyecto(pProyectoID);
-                        using (CMSCN CMSCN = new CMSCN(mEntityContext, mLoggingService, mConfigService, mServicesUtilVirtuosoAndReplication, mLoggerFactory.CreateLogger<CMSCN>(), mLoggerFactory))
+                        using (CMSCN CMSCN = new CMSCN(mEntityContext, mLoggingService, mConfigService, mServicesUtilVirtuosoAndReplication, _loggerFactory.CreateLogger<CMSCN>(), _loggerFactory))
                         using (GestionCMS gestorCMS2 = new GestionCMS(CMSCN.ObtenerCMSDeProyecto(pProyectoID), mLoggingService, mEntityContext))
                         {
                             if (gestorCMS2.ListaPaginasProyectos.ContainsKey(pProyectoID))
@@ -353,7 +356,7 @@ namespace Gnoss.BackgroundTask.Workflows
                                     cmsCL.InvalidarCacheCMSDeUbicacionDeProyecto(tipoPagina, pProyectoID);
                                 }
 
-                                ProyectoCN proyCN = new ProyectoCN(mEntityContext, mLoggingService, mConfigService, mServicesUtilVirtuosoAndReplication, mLoggerFactory.CreateLogger<ProyectoCN>(), mLoggerFactory);
+                                ProyectoCN proyCN = new ProyectoCN(mEntityContext, mLoggingService, mConfigService, mServicesUtilVirtuosoAndReplication, _loggerFactory.CreateLogger<ProyectoCN>(), _loggerFactory);
                                 List<Guid> proys = new List<Guid> { pProyectoID };
                                 DataWrapperProyecto dw = proyCN.ObtenerProyectosHijosDeProyectos(proys, pUsuarioID);
                                 cmsCL.InvalidarCachesCMSDeUbicacionesDeProyectos(dw.ListaProyecto);
@@ -379,9 +382,19 @@ namespace Gnoss.BackgroundTask.Workflows
             }
         }
 
-        public int ObtenerTipoLive(TiposContenidos pTipoContenido)
+        private int ObtenerTipoLive(TiposContenidos pTipoContenido)
         {
             return pTipoContenido == TiposContenidos.Debate ? (int)TipoLive.Debate : (int)TipoLive.Recurso;
+        }
+
+        private void EliminarFlujo(Guid pFlujoID, Guid pProyectoID, FlujosCN pFlujosCN)
+        {
+            List<Guid> estados = pFlujosCN.ObtenerEstadosIDPorFlujoID(pFlujoID);
+            List<Guid> transiciones = pFlujosCN.ObtenerTransicionesIDPorEstadosID(estados);
+
+            pFlujosCN.EliminarTransiciones(transiciones);
+            pFlujosCN.EliminarEstados(estados, pFlujoID);
+            pFlujosCN.EliminarFlujo(pFlujoID, pProyectoID);
         }
 
         #endregion
