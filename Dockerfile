@@ -29,8 +29,8 @@ WORKDIR /app
 COPY --from=build-env /app/out .
 
 RUN groupadd -g 2000 gnoss && useradd -u 2000 -g 2000 gnoss &&\
-	mkdir -p config &&\
-	chown -R gnoss:gnoss config && chmod -R 777 config
+	mkdir -p config logs trazas &&\
+	chown -R gnoss:gnoss config logs trazas && chmod -R 750 config logs trazas
 USER gnoss
 
 ENTRYPOINT ["dotnet", "Gnoss.BackgroundTask.Workflows.dll"]
