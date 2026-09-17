@@ -27,7 +27,7 @@ using Es.Riam.Gnoss.Web.MVC.Models.Flujos;
 using Es.Riam.Interfaces.InterfacesOpen;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Newtonsoft.Json;
+using System.Text.Json;
 
 namespace Gnoss.BackgroundTask.Workflows
 {
@@ -48,6 +48,7 @@ namespace Gnoss.BackgroundTask.Workflows
 
         private readonly ILogger _logger;
         private readonly ILoggerFactory _loggerFactory;
+        private RabbitMQClient mRabbitMQClient;
 
         #endregion
 
@@ -75,11 +76,12 @@ namespace Gnoss.BackgroundTask.Workflows
             {
                 RabbitMQClient.ReceivedDelegate funcionProcesarItem = new RabbitMQClient.ReceivedDelegate(ProcesarItem);
                 RabbitMQClient.ShutDownDelegate funcionShutDown = new RabbitMQClient.ShutDownDelegate(OnShutDown);
-                RabbitMQClient rMQ = new RabbitMQClient(RabbitMQClient.BD_SERVICIOS_WIN, COLA_FLUJOS, loggingService, mConfigService, _loggerFactory.CreateLogger<RabbitMQClient>(), _loggerFactory);
+                mRabbitMQClient?.Dispose();
+                mRabbitMQClient = new RabbitMQClient(RabbitMQClient.BD_SERVICIOS_WIN, COLA_FLUJOS, loggingService, mConfigService, _loggerFactory.CreateLogger<RabbitMQClient>(), _loggerFactory);
 
                 try
                 {
-                    rMQ.ObtenerElementosDeCola(funcionProcesarItem, funcionShutDown);
+                    mRabbitMQClient.ObtenerElementosDeCola(funcionProcesarItem, funcionShutDown);
                 }
                 catch (Exception ex)
                 {
@@ -89,7 +91,7 @@ namespace Gnoss.BackgroundTask.Workflows
             }
         }
 
-        public override void RealizarMantenimiento(EntityContext entityContext, EntityContextBASE entityContextBASE, UtilidadesVirtuoso utilidadesVirtuoso, LoggingService loggingService, RedisCacheWrapper redisCacheWrapper, GnossCache gnossCache, VirtuosoAD virtuosoAD, IServicesUtilVirtuosoAndReplication servicesUtilVirtuosoAndReplication)
+        public override void RealizarMantenimiento(EntityContext entityContext, EntityContextBASE entityContextBASE, UtilidadesVirtuoso utilidadesVirtuoso, LoggingService loggingService, RedisCacheWrapper redisCacheWrapper, GnossCache gnossCache, IServicesUtilVirtuosoAndReplication servicesUtilVirtuosoAndReplication)
         {
             Thread.Sleep(1000);
 
@@ -97,11 +99,6 @@ namespace Gnoss.BackgroundTask.Workflows
             ParametroAplicacionGBD parametroAplicacionGBD = new ParametroAplicacionGBD(loggingService, entityContext, mConfigService);
             parametroAplicacionGBD.ObtenerConfiguracionGnoss(gestorParametroAplicacion);
             mUrlIntragnoss = gestorParametroAplicacion.ParametroAplicacion.Find(parametroApp => parametroApp.Parametro.Equals("UrlIntragnoss")).Valor;
-
-            FacetaCN facetaCN = new FacetaCN(entityContext, loggingService, mConfigService, servicesUtilVirtuosoAndReplication, _loggerFactory.CreateLogger<FacetaCN>(), _loggerFactory);
-            FacetadoAD facetadoAD = new FacetadoAD(mUrlIntragnoss, loggingService, entityContext, mConfigService, virtuosoAD, servicesUtilVirtuosoAndReplication, _loggerFactory.CreateLogger<FacetadoAD>(), _loggerFactory);
-            facetaCN.CargarConfiguracionConexionGrafo(facetadoAD.ServidoresGrafo);
-            facetaCN.Dispose();
 
             ProyectoCN proyCN = new ProyectoCN(entityContext, loggingService, mConfigService, servicesUtilVirtuosoAndReplication, _loggerFactory.CreateLogger<ProyectoCN>(), _loggerFactory);
             proyCN.Dispose();
@@ -145,7 +142,7 @@ namespace Gnoss.BackgroundTask.Workflows
                     {
                         mUrlIntragnoss = mEntityContext.ParametroAplicacion.Where(parametro => parametro.Parametro.Equals("UrlIntragnoss")).Select(item => item.Valor).FirstOrDefault();
 
-                        ColaProcesarFlujo elementoFila = JsonConvert.DeserializeObject<ColaProcesarFlujo>(pFila);
+                        ColaProcesarFlujo elementoFila = JsonSerializer.Deserialize<ColaProcesarFlujo>(pFila);
                         ProcesarFilaDeCola(elementoFila);
 
                         ControladorConexiones.CerrarConexiones(false);
